@@ -1,0 +1,7 @@
+.pixi/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+CLIP/data/
+CLIP/outputs/

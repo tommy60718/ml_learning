@@ -1,0 +1,3 @@
+[submodule "CLIP/external/openai-clip"]
+	path = CLIP/external/openai-clip
+	url = https://github.com/openai/CLIP.git
