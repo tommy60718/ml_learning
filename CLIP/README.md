@@ -1,33 +1,58 @@
 # CLIP — learn by building
 
-Educational walkthrough of CLIP: contrastive image–text training on real CIFAR-100 photos.
+Educational walkthrough of CLIP: contrastive image-text training on real CIFAR-100 photos.
 
-## Where to start (file anchors)
+## Start Here
 
-Read in this order:
+The highest-level anchor is [`train_real.py`](train_real.py).
 
-
-| Step | File                                            | Role                                                     |
-| ---- | ----------------------------------------------- | -------------------------------------------------------- |
-| 1    | `[clip_core.py](clip_core.py)`                  | **Loss anchor** — symmetric InfoNCE (the CLIP objective) |
-| 2    | `[model_real.py](model_real.py)`                | **Model anchor** — ResNet-18 + text encoder architecture |
-| 3    | `[dataset_cifar.py](dataset_cifar.py)`          | **Data anchor** — CIFAR-100 → (image, caption tokens)    |
-| 4    | `[train_real.py](train_real.py)`                | **Training anchor** — full train loop (`train()`)        |
-| 5    | `[train_real.py](train_real.py)` → `evaluate()` | **Testing anchor** — validation metrics + heatmaps       |
-| 6    | `[sanity_check.py](sanity_check.py)`            | **Sanity anchor** — automated checks vs submodule        |
-
+Read that file first because it shows the full user journey:
 
 ```text
-clip_core.py      ← WHAT we optimize (contrastive loss)
-model_real.py     ← WHO learns (dual encoders)
-dataset_cifar.py  ← WHAT we feed in (image–text pairs)
-train_real.py     ← HOW we train + HOW we measure success
-sanity_check.py   ← verify against external/openai-clip
+train_real.py
+├── train()      ← training process: CLIP Steps 1-6
+├── evaluate()   ← testing process:  CLIP Steps 1-5
+└── plot_*()     ← visual proof: heatmaps + curves
 ```
+
+Everything else is a component called by `train_real.py`.
+
+## Big Map
+
+CLIP has two related flows:
+
+| Flow | Steps | Purpose | Anchor |
+|------|-------|---------|--------|
+| **Testing / validation** | Steps 1-5 | Measure alignment without changing weights | `evaluate()` in [`train_real.py`](train_real.py) |
+| **Training** | Steps 1-6 | Measure loss, then update model weights | `train()` in [`train_real.py`](train_real.py) |
+
+```text
+Step 1  DATA          dataset_cifar.py
+Step 2  ENCODE IMAGE  model_real.py → ImageEncoder
+Step 3  ENCODE TEXT   model_real.py → TextEncoder
+Step 4  SCORE         clip_core.py
+Step 5  LOSS          clip_core.py
+Step 6  UPDATE        train_real.py only (backward + optimizer.step)
+```
+
+Testing stops after Step 5. Training adds Step 6.
+
+## Component Anchors
+
+Use this table when you want to zoom into one part of the system:
+
+| Component | File | What To Read |
+|-----------|------|--------------|
+| **Top-level guide** | [`train_real.py`](train_real.py) | `train()` first, then `evaluate()` |
+| **Data** | [`dataset_cifar.py`](dataset_cifar.py) | `CIFAR100CLIPDataset.__getitem__()` and `build_cifar_loaders()` |
+| **Model** | [`model_real.py`](model_real.py) | `RealCLIP.forward()`, `ImageEncoder`, `TextEncoder` |
+| **Loss** | [`clip_core.py`](clip_core.py) | `clip_contrastive_loss()` |
+| **Sanity check** | [`sanity_check.py`](sanity_check.py) | automated checks vs OpenAI CLIP |
+| **Official reference** | [`external/openai-clip/`](external/openai-clip/) | upstream OpenAI implementation |
 
 ### Official reference (submodule, not our code)
 
-`[external/openai-clip/](external/openai-clip/)` — git submodule pointing at [github.com/openai/CLIP](https://github.com/openai/CLIP).
+[`external/openai-clip/`](external/openai-clip/) — git submodule pointing at [github.com/openai/CLIP](https://github.com/openai/CLIP).
 
 After cloning:
 
@@ -84,7 +109,80 @@ flowchart TB
   OPT --> EVAL["train_real.py: evaluate()"]
 ```
 
+## Testing Process: Steps 1-5
 
+Testing answers: **does the current model align matching image-text pairs?**
+
+Testing does **not** update weights.
+
+```text
+evaluate(model, val_loader, device)
+├── Step 1  DATA          get validation batch
+├── Step 2  ENCODE IMAGE  model.encode_image(...)
+├── Step 3  ENCODE TEXT   model.encode_text(...)
+├── Step 4  SCORE         similarity matrix: I @ T.T
+├── Step 5  LOSS          symmetric contrastive loss
+└── Metrics               val_loss, image→text acc, text→image acc
+```
+
+Run the fast automated test:
+
+```bash
+cd ~/ml_learning
+pixi run clip-sanity
+```
+
+What it checks:
+
+- the OpenAI CLIP submodule exists
+- our logits formula matches OpenAI CLIP
+- the model forward pass works
+- the CIFAR data pipeline works
+- one tiny training step is differentiable
+
+## Training Process: Steps 1-6
+
+Training answers: **can the model improve from data?**
+
+Training includes all testing steps, then adds the update step.
+
+```text
+train(cfg)
+├── setup                 config, seed, device
+├── Step 1  DATA          build train/val loaders
+├── setup                 build RealCLIP + Adam optimizer
+├── Steps 1-5             baseline evaluate() before training
+├── epoch loop
+│   ├── Step 1  DATA      get train batch
+│   ├── Step 2  IMAGE     ResNet-18 → image embedding
+│   ├── Step 3  TEXT      word embeddings → text embedding
+│   ├── Step 4  SCORE     N×N similarity matrix
+│   ├── Step 5  LOSS      diagonal positives, off-diagonal negatives
+│   └── Step 6  UPDATE    loss.backward() + optimizer.step()
+├── Steps 1-5             validate after each epoch
+└── Steps 1-5             final evaluate + save plots
+```
+
+Run training:
+
+```bash
+cd ~/ml_learning
+pixi run clip-train
+```
+
+First run downloads CIFAR-100 (~170 MB) into `CLIP/data/`.
+
+Expected direction:
+
+| Metric | Before | After (typical) |
+|--------|--------|-----------------|
+| `val_loss` | ~2-4 | decreases |
+| `val_acc` | near random | **50-70%+** |
+
+Open after training:
+
+- `outputs/similarity_before.png` vs `outputs/similarity_after.png`
+- `outputs/training_curves.png`
 
 ## Commands
 
@@ -97,9 +195,9 @@ pixi run clip-sanity   # automated checks vs openai-clip submodule
 pixi run clip-train    # train + validate on CIFAR-100
 ```
 
-## Testing guide
+## Manual Checks
 
-### 1. Smoke test (model only)
+### Smoke test
 
 ```bash
 pixi run clip-smoke
@@ -107,27 +205,7 @@ pixi run clip-smoke
 
 Expect: `logits shape: [4, 4]` and a loss value. Confirms PyTorch + model compile.
 
-### 2. Train + validate (main lesson)
-
-```bash
-pixi run clip-train
-```
-
-First run downloads CIFAR-100 (~170 MB) into `CLIP/data/`.
-
-
-| Metric     | Before       | After (typical) |
-| ---------- | ------------ | --------------- |
-| `val_loss` | ~2–3         | decreases       |
-| `val_acc`  | ~6% (random) | **50–70%+**     |
-
-
-Open after training:
-
-- `outputs/similarity_before.png` vs `similarity_after.png` — diagonal should brighten
-- `outputs/training_curves.png` — loss down, accuracy up
-
-### 3. Automated sanity check (recommended)
+### Automated sanity check
 
 ```bash
 pixi run clip-sanity
@@ -135,7 +213,7 @@ pixi run clip-sanity
 
 Checks submodule, loss formula vs `external/openai-clip/clip/model.py`, data pipeline, and one train step.
 
-### 4. Data sanity check (manual)
+### Data sanity check
 
 ```bash
 pixi shell
